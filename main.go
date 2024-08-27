@@ -1,12 +1,18 @@
 package main
 
 import (
+	"bytes"
+	"encoding/base64"
+	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	cast "github.com/AndreasAbdi/gochromecast"
@@ -16,14 +22,37 @@ import (
 func main() {
 	log.SetFlags(0)
 
-	if len(os.Args) != 2 {
-		log.Println("Usage: castaudio <file>")
+	if len(os.Args) != 3 {
+		log.Println("Usage: castaudio <play|speak> <file|text>")
 		return
 	}
 
-	url, mime, err := HostFile(os.Args[1])
-	if err != nil {
-		panic(err)
+	var url, mime string
+	var err error
+	switch os.Args[1] {
+	case "play":
+		audio, err := os.ReadFile(os.Args[2])
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		url, mime, err = HostAudio(audio)
+		if err != nil {
+			log.Fatal(err)
+		}
+	case "speak":
+		audio, err := TTS(os.Args[2], "de")
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		url, mime, err = HostAudio(audio)
+		if err != nil {
+			log.Fatal(err)
+		}
+	default:
+		log.Println("Usage: castaudio <play|speak> <file|text>")
+		return
 	}
 
 	ip, port, err := LookupDevice("_googlecast._tcp")
@@ -61,6 +90,26 @@ func HostFile(file string) (string, string, error) {
 	return url, mimeType, nil
 }
 
+func HostAudio(audio []byte) (string, string, error) {
+	ln, err := net.Listen("tcp", ":0")
+	if err != nil {
+		return "", "", err
+	}
+
+	go http.Serve(ln, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write(audio)
+	}))
+
+	var (
+		port     = ln.Addr().(*net.TCPAddr).Port
+		ip       = GetOutboundIP()
+		url      = fmt.Sprintf("http://%s:%d/audio", ip, port)
+		mimeType = http.DetectContentType(audio)
+	)
+
+	return url, mimeType, nil
+}
+
 func PlaySound(ip net.IP, port int, url, mimetype string) error {
 	dev, err := cast.NewDevice(ip, port)
 	if err != nil {
@@ -90,7 +139,7 @@ func LookupDevice(serviceAddr string) (net.IP, int, error) {
 		Port: 5353,
 	})
 
-	conn.SetReadDeadline(time.Now().Add(1 * time.Second))
+	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
 
 	resp := make([]byte, 65536)
 	n, err := conn.Read(resp)
@@ -127,4 +176,51 @@ func GetOutboundIP() net.IP {
 	localAddr := conn.LocalAddr().(*net.UDPAddr)
 
 	return localAddr.IP
+}
+
+func TTS(text, lang string) ([]byte, error) {
+	encoded := strings.ReplaceAll(url.QueryEscape(text), "%", "%25")
+
+	resp, err := http.Get(fmt.Sprintf("https://www.google.com/async/translate_tts?ttsp=tl:%s,txt:%s,spd:1.1&async=_fmt:jspb", lang, encoded))
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	var buf bytes.Buffer
+	if _, err := io.Copy(&buf, resp.Body); err != nil {
+		return nil, err
+	}
+
+	segs := bytes.Split(buf.Bytes(), []byte("\n"))
+	if len(segs) != 2 {
+		return nil, fmt.Errorf("unexpected response")
+	}
+
+	var out struct {
+		TranslateTTS []string `json:"translate_tts"`
+	}
+	if err := json.Unmarshal(segs[1], &out); err != nil {
+		return nil, err
+	}
+
+	audio, err := base64.StdEncoding.DecodeString(out.TranslateTTS[0])
+	if err != nil {
+		return nil, err
+	}
+
+	return audio, nil
+}
+
+func writeTempFile(data []byte) (string, func(), error) {
+	tempFile, err := os.CreateTemp(os.TempDir(), "example")
+	if err != nil {
+		return "", nil, err
+	}
+	tempFile.Write(data)
+	cleanup := func() {
+		tempFile.Close()
+		os.Remove(tempFile.Name())
+	}
+	return tempFile.Name(), cleanup, nil
 }
