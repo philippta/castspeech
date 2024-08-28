@@ -2,7 +2,9 @@ package main
 
 import (
 	"bytes"
+	"crypto/md5"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -22,37 +24,31 @@ import (
 func main() {
 	log.SetFlags(0)
 
-	if len(os.Args) != 3 {
-		log.Println("Usage: castaudio <play|speak> <file|text>")
+	if len(os.Args) < 2 {
+		log.Println("Usage: castaudio <text> [language]")
 		return
 	}
 
-	var url, mime string
-	var err error
-	switch os.Args[1] {
-	case "play":
-		audio, err := os.ReadFile(os.Args[2])
-		if err != nil {
-			log.Fatal(err)
-		}
+	text := os.Args[1]
+	lang := "de"
 
-		url, mime, err = HostAudio(audio)
-		if err != nil {
-			log.Fatal(err)
-		}
-	case "speak":
-		audio, err := TTS(os.Args[2], "de")
-		if err != nil {
-			log.Fatal(err)
-		}
+	if len(os.Args) == 3 {
+		lang = os.Args[2]
+	}
 
-		url, mime, err = HostAudio(audio)
+	audio, ok := lookupAudio(text, lang)
+	if !ok {
+		var err error
+		audio, err = TTS(text, lang)
 		if err != nil {
 			log.Fatal(err)
 		}
-	default:
-		log.Println("Usage: castaudio <play|speak> <file|text>")
-		return
+		saveAudio(text, lang, audio)
+	}
+
+	url, mime, err := HostAudio(audio)
+	if err != nil {
+		log.Fatal(err)
 	}
 
 	ip, port, err := LookupDevice("_googlecast._tcp")
@@ -61,6 +57,44 @@ func main() {
 	}
 
 	PlaySound(ip, port, url, mime)
+}
+
+func lookupAudio(text, lang string) ([]byte, bool) {
+	file, err := audioFilepath(text, lang)
+	if err != nil {
+		return nil, false
+	}
+
+	audio, err := os.ReadFile(file)
+	if err != nil {
+		return nil, false
+	}
+
+	return audio, true
+}
+
+func saveAudio(text, lang string, audio []byte) {
+	file, err := audioFilepath(text, lang)
+	if err != nil {
+		return
+	}
+	os.WriteFile(file, audio, 0o644)
+}
+
+func audioFilepath(text, lang string) (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+
+	path := filepath.Join(home, ".castaudio")
+	os.MkdirAll(path, 0755)
+
+	hashb := md5.Sum([]byte(text))
+	hash := hex.EncodeToString(hashb[:])
+	file := filepath.Join(path, lang+"_"+hash)
+
+	return file, nil
 }
 
 func HostFile(file string) (string, string, error) {
@@ -116,7 +150,9 @@ func PlaySound(ip net.IP, port int, url, mimetype string) error {
 		return err
 	}
 
-	dev.PlayMedia(url, mimetype)
+	appID := "CC1AD845"
+	dev.ReceiverController.LaunchApplication(&appID, time.Second, false)
+	dev.MediaController.Load(url, mimetype, time.Second)
 	return nil
 }
 
@@ -139,7 +175,7 @@ func LookupDevice(serviceAddr string) (net.IP, int, error) {
 		Port: 5353,
 	})
 
-	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	conn.SetReadDeadline(time.Now().Add(5 * time.Second))
 
 	resp := make([]byte, 65536)
 	n, err := conn.Read(resp)

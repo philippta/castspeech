@@ -1,10 +1,12 @@
 # CastAudio
 
-CastAudio is a simple command-line tool that allows you to cast audio files to Google Cast devices on your local network.
+CastAudio is a command-line tool that allows you to cast text-to-speech audio to Google Cast devices on your local network.
 
 ## Features
 
 - Automatically discovers Google Cast devices on the local network
+- Converts text to speech using Google's TTS service
+- Caches generated audio files for future use
 - Hosts the audio file on a temporary HTTP server
 - Casts the audio to the discovered device
 
@@ -25,19 +27,34 @@ This command will download the latest version of CastAudio and install it in you
 
 ## Usage
 
-Run the program with the path to the audio file you want to cast:
+Run the program with the text you want to cast and optionally specify a language:
 
 ```
-castaudio /path/to/your/audiofile.mp3
+castaudio <text> [language]
 ```
 
-The program will automatically discover a Google Cast device on your network and start playing the audio.
+Example:
+```
+castaudio "Hello, world!" en
+```
+
+If no language is specified, it defaults to German ("de").
+
+The program will automatically discover a Google Cast device on your network, convert the text to speech, and start playing the audio.
 
 ## How It Works
 
-1. The program hosts the specified audio file on a temporary HTTP server.
-2. It uses mDNS to discover Google Cast devices on the local network.
-3. Once a device is found, it uses the `gochromecast` library to connect to the device and start playback.
+1. The program takes the input text and language (defaulting to German if not specified).
+2. It checks if an audio file for the given text and language already exists in the cache.
+3. If not found in the cache, it uses Google's TTS service to convert the text to speech.
+4. The generated audio is saved in the cache for future use.
+5. The audio file is hosted on a temporary HTTP server.
+6. It uses mDNS to discover Google Cast devices on the local network.
+7. Once a device is found, it uses the `gochromecast` library to connect to the device and start playback.
+
+## Caching
+
+CastAudio caches generated audio files in the `~/.castaudio` directory. This reduces API calls and speeds up repeated announcements.
 
 ## Why
 
