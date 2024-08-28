@@ -1,4 +1,4 @@
-module github.com/philippta/castaudio
+module github.com/philippta/castspeech
 
 go 1.22.0
 

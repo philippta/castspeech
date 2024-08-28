@@ -25,7 +25,7 @@ func main() {
 	log.SetFlags(0)
 
 	if len(os.Args) < 2 {
-		log.Println("Usage: castaudio <text> [language]")
+		log.Println("Usage: castspeech <text> [language]")
 		return
 	}
 
@@ -87,7 +87,7 @@ func audioFilepath(text, lang string) (string, error) {
 		return "", err
 	}
 
-	path := filepath.Join(home, ".castaudio")
+	path := filepath.Join(home, ".castspeech")
 	os.MkdirAll(path, 0755)
 
 	hashb := md5.Sum([]byte(text))
@@ -151,7 +151,7 @@ func PlaySound(ip net.IP, port int, url, mimetype string) error {
 	}
 
 	appID := "CC1AD845"
-	dev.ReceiverController.LaunchApplication(&appID, time.Second, false)
+	dev.ReceiverController.LaunchApplication(&appID, 5*time.Second, false)
 	dev.MediaController.Load(url, mimetype, time.Second)
 	return nil
 }
